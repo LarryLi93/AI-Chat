@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { LayoutGrid } from 'lucide-react';
 
@@ -18,7 +17,7 @@ export const Layout: React.FC<LayoutProps> = ({
   onUserClick 
 }) => {
   return (
-    <div className="flex flex-col h-full w-full animate-slide-in-right">
+    <div className="absolute inset-0 flex flex-col h-full w-full animate-slide-in-right bg-[#fafafa]">
       <header className="z-30 px-5 py-3 flex items-center justify-between glass-effect border-b border-gray-100/50">
         <button 
           onClick={onSwitchClick}

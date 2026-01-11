@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -7,7 +7,7 @@ import rehypeKatex from 'rehype-katex';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Message, Role } from '../types';
-import { FileText, ChevronDown, ChevronUp, Brain, Loader2 } from 'lucide-react';
+import { FileText, ChevronDown, ChevronUp, Brain, Loader2, Play, Trash2, XCircle, Terminal } from 'lucide-react';
 import { ChartRenderer } from './ChartRenderer';
 
 interface MessageBubbleProps {
@@ -16,15 +16,146 @@ interface MessageBubbleProps {
   isLast?: boolean;
 }
 
+const ExecutableCodeBlock: React.FC<{ code: string; language: string }> = ({ code, language }) => {
+  const [output, setOutput] = useState<{ type: 'log' | 'error' | 'warn'; content: string }[]>([]);
+  const [isRunning, setIsRunning] = useState(false);
+  const [showOutput, setShowOutput] = useState(false);
+
+  const runCode = async () => {
+    if (language !== 'javascript' && language !== 'js' && language !== 'typescript' && language !== 'ts') {
+      setOutput([{ type: 'error', content: `Execution is only supported for JavaScript/TypeScript in this environment.` }]);
+      setShowOutput(true);
+      return;
+    }
+
+    setIsRunning(true);
+    setShowOutput(true);
+    const logs: { type: 'log' | 'error' | 'warn'; content: string }[] = [];
+
+    // Capture console output
+    const originalLog = console.log;
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    console.log = (...args: any[]) => {
+      logs.push({ type: 'log', content: args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ') });
+    };
+    console.error = (...args: any[]) => {
+      logs.push({ type: 'error', content: args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ') });
+    };
+    console.warn = (...args: any[]) => {
+      logs.push({ type: 'warn', content: args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ') });
+    };
+
+    try {
+      // Create an async function context to allow 'await' in the code
+      const execute = new Function(`return (async () => { ${code} })()`);
+      await execute();
+    } catch (err: any) {
+      logs.push({ type: 'error', content: err.message || String(err) });
+    } finally {
+      // Restore console
+      console.log = originalLog;
+      console.error = originalError;
+      console.warn = originalWarn;
+      
+      setOutput(logs.length > 0 ? logs : [{ type: 'log', content: '(Execution finished with no output)' }]);
+      setIsRunning(false);
+    }
+  };
+
+  return (
+    <div className="relative my-5 group overflow-hidden rounded-2xl border border-black/10 shadow-lg text-left">
+      <div className="absolute top-3 right-3 z-10 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={runCode}
+          disabled={isRunning}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-[11px] font-bold uppercase tracking-wider shadow-lg transition-all active:scale-95 disabled:opacity-50"
+        >
+          {isRunning ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} fill="currentColor" />}
+          Run
+        </button>
+      </div>
+
+      <SyntaxHighlighter
+        style={oneDark}
+        language={language}
+        PreTag="div"
+        customStyle={{
+          margin: 0,
+          borderRadius: 0,
+          fontSize: '13px',
+          padding: '1.5rem',
+          background: '#1e1e1e',
+        }}
+      >
+        {code}
+      </SyntaxHighlighter>
+
+      {showOutput && (
+        <div className="bg-[#121212] border-t border-white/5 p-4 animate-in slide-in-from-top-2 duration-300">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2 text-gray-500 text-[10px] font-bold uppercase tracking-[0.2em]">
+              <Terminal size={12} />
+              Output
+            </div>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => setOutput([])} 
+                className="p-1 hover:text-white text-gray-500 transition-colors"
+                title="Clear output"
+              >
+                <Trash2 size={14} />
+              </button>
+              <button 
+                onClick={() => setShowOutput(false)} 
+                className="p-1 hover:text-white text-gray-500 transition-colors"
+                title="Close output"
+              >
+                <XCircle size={14} />
+              </button>
+            </div>
+          </div>
+          <div className="font-mono text-[12px] space-y-1 max-h-[200px] overflow-y-auto no-scrollbar">
+            {output.map((line, i) => (
+              <div 
+                key={i} 
+                className={`whitespace-pre-wrap break-all ${
+                  line.type === 'error' ? 'text-red-400' : 
+                  line.type === 'warn' ? 'text-amber-400' : 
+                  'text-green-400/90'
+                }`}
+              >
+                {line.type === 'log' ? '> ' : ''}{line.content}
+              </div>
+            ))}
+            {isRunning && (
+              <div className="flex items-center gap-2 text-blue-400/70 italic">
+                <Loader2 size={12} className="animate-spin" />
+                Executing...
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ThinkingProcess: React.FC<{ content: string; isStreaming?: boolean }> = ({ content, isStreaming }) => {
   const [isExpanded, setIsExpanded] = useState(true);
+  const wasStreaming = useRef(isStreaming);
 
-  // Auto-expand when content starts appearing
   useEffect(() => {
-    if (content.length > 0) {
+    if (content.length > 0 && isStreaming) {
       setIsExpanded(true);
     }
-  }, [content.length]);
+    // Automatically collapse when streaming finishes
+    if (wasStreaming.current && !isStreaming) {
+      setIsExpanded(false);
+    }
+    wasStreaming.current = isStreaming;
+  }, [content.length, isStreaming]);
 
   return (
     <div className="mb-4 overflow-hidden border-l-2 border-blue-200/50 pl-4 py-1 text-left">
@@ -33,7 +164,7 @@ const ThinkingProcess: React.FC<{ content: string; isStreaming?: boolean }> = ({
         className="flex items-center gap-2 text-[11px] font-bold text-blue-500/70 uppercase tracking-widest transition-colors hover:text-blue-600"
       >
         <Brain size={12} className={isStreaming ? "animate-pulse" : ""} />
-        <span>Thinking Process</span>
+        <span>思考过程</span>
         {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
       </button>
       {isExpanded && (
@@ -58,22 +189,7 @@ const ThinkingProcess: React.FC<{ content: string; isStreaming?: boolean }> = ({
                   return <ChartRenderer json={String(children).replace(/\n$/, '')} />;
                 }
                 if (!inline && match) {
-                  return (
-                    <SyntaxHighlighter
-                      style={oneDark}
-                      language={match[1]}
-                      PreTag="div"
-                      customStyle={{
-                        margin: '1.25rem 0',
-                        borderRadius: '16px',
-                        fontSize: '13px',
-                        padding: '1.25rem',
-                      }}
-                      {...props}
-                    >
-                      {String(children).replace(/\n$/, '')}
-                    </SyntaxHighlighter>
-                  );
+                  return <ExecutableCodeBlock code={String(children).replace(/\n$/, '')} language={match[1]} />;
                 }
                 return (
                   <code className={className} {...props}>
@@ -95,11 +211,10 @@ const ThinkingProcess: React.FC<{ content: string; isStreaming?: boolean }> = ({
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderName, isLast }) => {
   const isUser = message.role === Role.USER;
 
-  // Placeholder state for AI while waiting for first token
   if (!isUser && !message.content.trim()) {
     return (
       <div className="flex w-full mb-5 animate-in fade-in slide-in-from-bottom-2 duration-500 justify-start">
-        <div className="max-w-full text-left">
+        <div className="max-w-[96%] text-left">
           <div className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400/80 px-1 ml-1">
             {senderName}
           </div>
@@ -112,12 +227,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderNam
     );
   }
 
-  // Improved regex for streaming: match content after <thought> even if </thought> is missing
   const thoughtRegex = /<thought>([\s\S]*?)(?:<\/thought>|$)/i;
   const thoughtMatch = message.content.match(thoughtRegex);
   const thoughtContent = thoughtMatch ? thoughtMatch[1] : null;
   
-  // Content after the closing tag (if it exists) or empty if still thinking
   const hasClosingTag = message.content.includes('</thought>');
   const mainContent = hasClosingTag 
     ? message.content.split('</thought>')[1].trim()
@@ -125,9 +238,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderNam
 
   return (
     <div className={`flex w-full mb-5 animate-in fade-in slide-in-from-bottom-2 duration-500 ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div className={`max-w-[85%] ${isUser ? 'text-right' : 'text-left'}`}>
+      <div className={`max-w-[96%] ${isUser ? 'text-right' : 'text-left'}`}>
         
-        {/* Sender Name */}
         <div className={`mb-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400/80 px-1 ${isUser ? 'mr-1' : 'ml-1'}`}>
           {senderName}
         </div>
@@ -139,7 +251,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderNam
             : 'bg-white border border-gray-100 rounded-[26px] rounded-tl-none text-gray-800 shadow-sm'
           }
         `}>
-          {/* Attachments */}
           {message.attachments && message.attachments.length > 0 && (
             <div className={`flex flex-wrap gap-2 mb-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
               {message.attachments.map((att) => (
@@ -161,7 +272,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderNam
             </div>
           )}
 
-          {/* Thinking process - visible while streaming */}
           {!isUser && thoughtContent !== null && (
             <ThinkingProcess 
               content={thoughtContent} 
@@ -169,7 +279,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderNam
             />
           )}
 
-          {/* Main Content */}
           {(mainContent || (isLast && hasClosingTag)) && (
             <div className={`prose-aura ${isUser ? 'text-gray-900 font-medium' : 'text-gray-800'}`}>
               <ReactMarkdown 
@@ -192,22 +301,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderNam
                       return <ChartRenderer json={String(children).replace(/\n$/, '')} />;
                     }
                     if (!inline && match) {
-                      return (
-                        <SyntaxHighlighter
-                          style={oneDark}
-                          language={match[1]}
-                          PreTag="div"
-                          customStyle={{
-                            margin: '1.25rem 0',
-                            borderRadius: '16px',
-                            fontSize: '13px',
-                            padding: '1.25rem',
-                          }}
-                          {...props}
-                        >
-                          {String(children).replace(/\n$/, '')}
-                        </SyntaxHighlighter>
-                      );
+                      return <ExecutableCodeBlock code={String(children).replace(/\n$/, '')} language={match[1]} />;
                     }
                     return (
                       <code className={className} {...props}>
@@ -226,7 +320,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderNam
           )}
         </div>
 
-        {/* Timestamp */}
         <div className={`mt-2 text-[9px] font-bold uppercase tracking-widest opacity-20 ${isUser ? 'mr-2' : 'ml-2'}`}>
           {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </div>

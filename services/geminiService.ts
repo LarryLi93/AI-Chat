@@ -122,20 +122,16 @@ ${deepThinkingPrompt}
       systemInstruction: finalSystemInstruction,
     };
 
+    // Fix: Guideline requires setting both maxOutputTokens and thinkingBudget when tokens are constrained.
     if (isReportMode) {
-      // Set a very large token limit for the mega-report
-      generationConfig.maxOutputTokens = 120000; 
-    }
-
-    if (isDeepThinking) {
+      generationConfig.maxOutputTokens = 120000;
       generationConfig.thinkingConfig = { 
-        thinkingBudget: isReportMode ? 32000 : 16000 
+        thinkingBudget: isDeepThinking ? 32000 : 0 // Use a high budget if thinking, or 0 to disable but satisfy "must set" rule
       };
-      
-      if (isReportMode) {
-        // If both are on, ensure thinkingBudget doesn't exceed maxOutputTokens
-        generationConfig.maxOutputTokens = 120000;
-      }
+    } else if (isDeepThinking) {
+      generationConfig.thinkingConfig = { 
+        thinkingBudget: 16000 
+      };
     }
 
     const chat = ai.chats.create({
