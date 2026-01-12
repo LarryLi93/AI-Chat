@@ -39,7 +39,7 @@ export const Layout: React.FC<LayoutProps> = ({
           onClick={onUserClick}
           className="px-2 text-gray-500 hover:text-gray-800 transition-colors text-[11px] font-medium tracking-widest uppercase outline-none"
         >
-          User
+          用户
         </button>
       </header>
 

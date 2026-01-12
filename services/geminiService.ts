@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
-import { Message, Role, Attachment } from "../types";
+import { Message, Role, Attachment, Assistant } from "../types";
 
 export class GeminiService {
   private model = 'gemini-3-flash-preview';
@@ -9,13 +9,18 @@ export class GeminiService {
   async *streamChat(
     history: Message[], 
     userInput: string, 
-    assistantInstruction: string,
+    assistant: Assistant,
     attachments?: Attachment[], 
     audioData?: { data: string, mimeType: string },
-    config?: { isDeepThinking?: boolean, isChartMode?: boolean, isReportMode?: boolean }
+    config?: { isDeepThinking?: boolean }
   ) {
+    if (assistant.type === 'n8n' && assistant.n8nUrl) {
+      yield* this.streamN8N(userInput, assistant);
+      return;
+    }
+
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
-    const { isDeepThinking = false, isChartMode = false, isReportMode = false } = config || {};
+    const { isDeepThinking = false } = config || {};
     
     const currentParts: any[] = [];
     
@@ -50,85 +55,28 @@ export class GeminiService {
         parts: [{ text: msg.content }]
       }));
 
-    // Data visualization instructions
-    const chartInstruction = isChartMode ? `
-[SYSTEM: DATA VISUALIZATION MODE ACTIVE]
-Whenever you present numerical data, statistics, or comparisons, you MUST use the specialized \`\`\`chart\`\`\` code block defined below to visualize it for the user:
-\`\`\`chart
-{
-  "type": "bar" | "line" | "pie" | "scatter" | "horizontalBar" | "metric",
-  "title": "Chart Title",
-  "data": [
-    {"name": "Label", "value": 10},
-    {"name": "Label 2", "value": 20}
-  ],
-  "xAxis": "Optional Label",
-  "yAxis": "Optional Label"
-}
-\`\`\`
-For "metric" type, data: [{"label": "Name", "value": "Val", "trend": "+X%"}].
-For scatter: [{"x": N, "y": N}].
-`.trim() : '';
-
-    // Structured Report instructions - Enhanced for 10+ chapters and massive length
-    const reportInstruction = isReportMode ? `
-[SYSTEM: MEGA-REPORT MODE ACTIVE]
-The user requires a MONUMENTAL, academic-grade report. 
-TARGET LENGTH: 10,000+ words.
-MINIMUM REQUIREMENT: AT LEAST 10 DISTINCT CHAPTERS.
-
-Your response MUST be an exhaustive, deep-dive analysis. 
-You must be EXTREMELY VERBOSE. Do not summarize or gloss over details. 
-Expand every thought into multiple long, descriptive paragraphs.
-
-REQUIRED CHAPTER STRUCTURE (Must include at least these 10):
-1. **Title Page & Introduction**: Deep background and problem statement (min 800 words).
-2. **Historical Evolution**: Comprehensive timeline and development stages.
-3. **Current Market/State Analysis**: Exhaustive look at the status quo.
-4. **Technical/Theoretical Framework**: Deep dive into underlying mechanics or theories.
-5. **Global Impact & Socio-Economic Influence**: Broad perspective analysis.
-6. **Detailed Case Studies (10+)**: Provide numerous specific, detailed real-world examples.
-7. **Risk Assessment & Mitigation**: Exhaustive analysis of challenges and solutions.
-8. **Technological Synergy & Alternatives**: Comparison with other domains/technologies.
-9. **Future Projections (Next 20 Years)**: Detailed multi-scenario forecasts.
-10. **Strategic Recommendations & Implementation Roadmap**: Actionable, multi-phase plan.
-11. **Conclusion & Visionary Outlook**: Final synthesis.
-
-IMPORTANT: Use high-level vocabulary. Avoid repetition but maximize detail. Quality and extreme quantity are the primary objectives.
-`.trim() : '';
-
-    // Turn-specific reinforced instruction
     const deepThinkingPrompt = isDeepThinking ? `
-[SYSTEM: DEEP THINKING ENABLED]
-For the user's latest query, you MUST:
-1. Begin your response with exactly: <thought>
-2. Write a comprehensive internal monologue analyzing the query, constraints, and your plan.
-3. End the monologue with exactly: </thought>
-4. Provide the final answer after the closing tag.
-DO NOT reuse or refer to previous thought blocks; create a NEW one for this specific turn.
+[系统提示：已开启深度思考模式]
+针对用户的最新提问，你必须：
+1. 以 <thought> 标签开始你的回复。
+2. 编写全面的内部独白，分析查询、约束条件及你的回复计划。
+3. 以 </thought> 标签结束独白。
+4. 在闭合标签后提供最终答案。
+请勿重复或引用之前的思考块；为本次对话创建全新的思考过程。
 `.trim() : '';
 
     const finalSystemInstruction = `
-${assistantInstruction}
-${reportInstruction}
-${chartInstruction}
+${assistant.instruction}
 ${deepThinkingPrompt}
 `.trim();
 
     const selectedModel = isDeepThinking ? this.reasoningModel : this.model;
 
-    // Use a very high maxOutputTokens for Report Mode to allow the "10k word" ambition
     const generationConfig: any = {
       systemInstruction: finalSystemInstruction,
     };
 
-    // Fix: Guideline requires setting both maxOutputTokens and thinkingBudget when tokens are constrained.
-    if (isReportMode) {
-      generationConfig.maxOutputTokens = 120000;
-      generationConfig.thinkingConfig = { 
-        thinkingBudget: isDeepThinking ? 32000 : 0 // Use a high budget if thinking, or 0 to disable but satisfy "must set" rule
-      };
-    } else if (isDeepThinking) {
+    if (isDeepThinking) {
       generationConfig.thinkingConfig = { 
         thinkingBudget: 16000 
       };
@@ -149,6 +97,83 @@ ${deepThinkingPrompt}
       const text = response.text;
       if (text) {
         yield text;
+      }
+    }
+  }
+
+  private async *streamN8N(userInput: string, assistant: Assistant) {
+    try {
+      let params = {};
+      try {
+        params = assistant.n8nParams ? JSON.parse(assistant.n8nParams) : {};
+      } catch (e) {
+        console.error("Params parse error", e);
+      }
+
+      const body = {
+        ...params,
+        chatInput: userInput
+      };
+
+      // Ensure URL is trimmed
+      const url = assistant.n8nUrl!.trim();
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        mode: 'cors'
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP 错误: ${response.status} ${response.statusText}`);
+      }
+
+      if (!response.body) throw new Error("服务器未返回数据流。");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        
+        let startIdx = 0;
+        let braceCount = 0;
+        let inString = false;
+
+        for (let i = 0; i < buffer.length; i++) {
+          const char = buffer[i];
+          if (char === '"' && buffer[i-1] !== '\\') inString = !inString;
+          if (!inString) {
+            if (char === '{') braceCount++;
+            if (char === '}') {
+              braceCount--;
+              if (braceCount === 0) {
+                const jsonStr = buffer.substring(startIdx, i + 1);
+                try {
+                  const obj = JSON.parse(jsonStr);
+                  if (obj.type === 'item' && obj.content) {
+                    yield obj.content;
+                  }
+                } catch (e) {
+                  // Ignore partial JSON
+                }
+                startIdx = i + 1;
+              }
+            }
+          }
+        }
+        buffer = buffer.substring(startIdx);
+      }
+    } catch (error: any) {
+      if (error.name === 'TypeError' || error.message.includes('fetch')) {
+        yield `[N8N 接入失败] Postman 能通但浏览器报错通常是跨域安全问题：\n\n1. **开启 CORS**：在 N8N 环境变量中设置 \`N8N_CORS_ALLOWED_ORIGINS=*\` 并重启。\n2. **混合内容**：本站是 HTTPS，若 N8N 是 HTTP 协议，浏览器会直接拦截。请使用 HTTPS 地址。\n3. **Webhook 类型**：确保使用 Production Webhook URL 而非测试版。`;
+      } else {
+        yield `[N8N 错误]: ${error.message}`;
       }
     }
   }

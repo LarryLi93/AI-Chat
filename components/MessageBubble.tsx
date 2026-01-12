@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -7,8 +6,7 @@ import rehypeKatex from 'rehype-katex';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Message, Role } from '../types';
-import { FileText, ChevronDown, ChevronUp, Brain, Loader2, Play, Trash2, XCircle, Terminal } from 'lucide-react';
-import { ChartRenderer } from './ChartRenderer';
+import { FileText, ChevronDown, ChevronUp, Brain, Loader2 } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: Message;
@@ -16,67 +14,14 @@ interface MessageBubbleProps {
   isLast?: boolean;
 }
 
-const ExecutableCodeBlock: React.FC<{ code: string; language: string }> = ({ code, language }) => {
-  const [output, setOutput] = useState<{ type: 'log' | 'error' | 'warn'; content: string }[]>([]);
-  const [isRunning, setIsRunning] = useState(false);
-  const [showOutput, setShowOutput] = useState(false);
-
-  const runCode = async () => {
-    if (language !== 'javascript' && language !== 'js' && language !== 'typescript' && language !== 'ts') {
-      setOutput([{ type: 'error', content: `Execution is only supported for JavaScript/TypeScript in this environment.` }]);
-      setShowOutput(true);
-      return;
-    }
-
-    setIsRunning(true);
-    setShowOutput(true);
-    const logs: { type: 'log' | 'error' | 'warn'; content: string }[] = [];
-
-    // Capture console output
-    const originalLog = console.log;
-    const originalError = console.error;
-    const originalWarn = console.warn;
-
-    console.log = (...args: any[]) => {
-      logs.push({ type: 'log', content: args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ') });
-    };
-    console.error = (...args: any[]) => {
-      logs.push({ type: 'error', content: args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ') });
-    };
-    console.warn = (...args: any[]) => {
-      logs.push({ type: 'warn', content: args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ') });
-    };
-
-    try {
-      // Create an async function context to allow 'await' in the code
-      const execute = new Function(`return (async () => { ${code} })()`);
-      await execute();
-    } catch (err: any) {
-      logs.push({ type: 'error', content: err.message || String(err) });
-    } finally {
-      // Restore console
-      console.log = originalLog;
-      console.error = originalError;
-      console.warn = originalWarn;
-      
-      setOutput(logs.length > 0 ? logs : [{ type: 'log', content: '(Execution finished with no output)' }]);
-      setIsRunning(false);
-    }
-  };
-
+const CodeBlock: React.FC<{ code: string; language: string }> = ({ code, language }) => {
   return (
-    <div className="relative my-5 group overflow-hidden rounded-2xl border border-black/10 shadow-lg text-left">
-      <div className="absolute top-3 right-3 z-10 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button
-          onClick={runCode}
-          disabled={isRunning}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-[11px] font-bold uppercase tracking-wider shadow-lg transition-all active:scale-95 disabled:opacity-50"
-        >
-          {isRunning ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} fill="currentColor" />}
-          Run
-        </button>
+    <div className="relative my-5 overflow-hidden rounded-2xl border border-black/10 shadow-lg text-left">
+      <div className="absolute top-3 right-3 z-10 opacity-40 hover:opacity-100 transition-opacity">
+        <span className="px-2 py-1 bg-white/10 text-white/50 rounded text-[10px] font-mono uppercase">
+          {language}
+        </span>
       </div>
-
       <SyntaxHighlighter
         style={oneDark}
         language={language}
@@ -91,53 +36,6 @@ const ExecutableCodeBlock: React.FC<{ code: string; language: string }> = ({ cod
       >
         {code}
       </SyntaxHighlighter>
-
-      {showOutput && (
-        <div className="bg-[#121212] border-t border-white/5 p-4 animate-in slide-in-from-top-2 duration-300">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2 text-gray-500 text-[10px] font-bold uppercase tracking-[0.2em]">
-              <Terminal size={12} />
-              Output
-            </div>
-            <div className="flex gap-2">
-              <button 
-                onClick={() => setOutput([])} 
-                className="p-1 hover:text-white text-gray-500 transition-colors"
-                title="Clear output"
-              >
-                <Trash2 size={14} />
-              </button>
-              <button 
-                onClick={() => setShowOutput(false)} 
-                className="p-1 hover:text-white text-gray-500 transition-colors"
-                title="Close output"
-              >
-                <XCircle size={14} />
-              </button>
-            </div>
-          </div>
-          <div className="font-mono text-[12px] space-y-1 max-h-[200px] overflow-y-auto no-scrollbar">
-            {output.map((line, i) => (
-              <div 
-                key={i} 
-                className={`whitespace-pre-wrap break-all ${
-                  line.type === 'error' ? 'text-red-400' : 
-                  line.type === 'warn' ? 'text-amber-400' : 
-                  'text-green-400/90'
-                }`}
-              >
-                {line.type === 'log' ? '> ' : ''}{line.content}
-              </div>
-            ))}
-            {isRunning && (
-              <div className="flex items-center gap-2 text-blue-400/70 italic">
-                <Loader2 size={12} className="animate-spin" />
-                Executing...
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 };
@@ -150,7 +48,6 @@ const ThinkingProcess: React.FC<{ content: string; isStreaming?: boolean }> = ({
     if (content.length > 0 && isStreaming) {
       setIsExpanded(true);
     }
-    // Automatically collapse when streaming finishes
     if (wasStreaming.current && !isStreaming) {
       setIsExpanded(false);
     }
@@ -173,23 +70,10 @@ const ThinkingProcess: React.FC<{ content: string; isStreaming?: boolean }> = ({
             remarkPlugins={[remarkGfm, remarkMath]} 
             rehypePlugins={[rehypeKatex]}
             components={{
-              pre({ children }) {
-                const codeChild = React.Children.toArray(children)[0] as any;
-                const isChart = codeChild?.props?.className?.includes('language-chart');
-                const isCodeBlock = codeChild?.props?.className?.includes('language-');
-                
-                if (isChart || isCodeBlock) {
-                  return <>{children}</>;
-                }
-                return <pre>{children}</pre>;
-              },
               code({ node, inline, className, children, ...props }: any) {
                 const match = /language-(\w+)/.exec(className || '');
-                if (!inline && match && match[1] === 'chart') {
-                  return <ChartRenderer json={String(children).replace(/\n$/, '')} />;
-                }
                 if (!inline && match) {
-                  return <ExecutableCodeBlock code={String(children).replace(/\n$/, '')} language={match[1]} />;
+                  return <CodeBlock code={String(children).replace(/\n$/, '')} language={match[1]} />;
                 }
                 return (
                   <code className={className} {...props}>
@@ -285,23 +169,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderNam
                 remarkPlugins={[remarkGfm, remarkMath]} 
                 rehypePlugins={[rehypeKatex]}
                 components={{
-                  pre({ children }) {
-                    const codeChild = React.Children.toArray(children)[0] as any;
-                    const isChart = codeChild?.props?.className?.includes('language-chart');
-                    const isCodeBlock = codeChild?.props?.className?.includes('language-');
-                    
-                    if (isChart || isCodeBlock) {
-                      return <>{children}</>;
-                    }
-                    return <pre>{children}</pre>;
-                  },
                   code({ node, inline, className, children, ...props }: any) {
                     const match = /language-(\w+)/.exec(className || '');
-                    if (!inline && match && match[1] === 'chart') {
-                      return <ChartRenderer json={String(children).replace(/\n$/, '')} />;
-                    }
                     if (!inline && match) {
-                      return <ExecutableCodeBlock code={String(children).replace(/\n$/, '')} language={match[1]} />;
+                      return <CodeBlock code={String(children).replace(/\n$/, '')} language={match[1]} />;
                     }
                     return (
                       <code className={className} {...props}>

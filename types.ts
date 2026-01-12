@@ -27,6 +27,9 @@ export interface Assistant {
   avatar: string;
   instruction: string;
   color: string;
+  type?: 'regular' | 'n8n';
+  n8nUrl?: string;
+  n8nParams?: string; // JSON string
 }
 
 export interface ChatState {
