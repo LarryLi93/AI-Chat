@@ -1,107 +1,23 @@
 
-import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { Message, Role, Attachment, Assistant } from "../types";
 
 export class GeminiService {
-  private model = 'gemini-3-flash-preview';
-  private reasoningModel = 'gemini-3-pro-preview';
-
   async *streamChat(
     history: Message[], 
     userInput: string, 
     assistant: Assistant,
     attachments?: Attachment[], 
-    audioData?: { data: string, mimeType: string },
-    config?: { isDeepThinking?: boolean }
+    audioData?: { data: string, mimeType: string }
   ) {
-    if (assistant.type === 'n8n' && assistant.n8nUrl) {
-      yield* this.streamN8N(userInput, assistant);
+    if (assistant.n8nUrl) {
+      yield* this.streamN8N(userInput, assistant, attachments);
       return;
-    }
-
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
-    const { isDeepThinking = false } = config || {};
-    
-    const currentParts: any[] = [];
-    
-    if (userInput) {
-      currentParts.push({ text: userInput });
-    }
-    
-    if (audioData) {
-      currentParts.push({
-        inlineData: {
-          data: audioData.data,
-          mimeType: audioData.mimeType
-        }
-      });
-    }
-
-    if (attachments) {
-      attachments.forEach(att => {
-        currentParts.push({
-          inlineData: {
-            data: att.data,
-            mimeType: att.mimeType
-          }
-        });
-      });
-    }
-
-    const chatHistory = history
-      .filter(msg => msg.content.trim() !== '')
-      .map(msg => ({
-        role: msg.role === Role.USER ? 'user' : 'model',
-        parts: [{ text: msg.content }]
-      }));
-
-    const deepThinkingPrompt = isDeepThinking ? `
-[系统提示：已开启深度思考模式]
-针对用户的最新提问，你必须：
-1. 以 <thought> 标签开始你的回复。
-2. 编写全面的内部独白，分析查询、约束条件及你的回复计划。
-3. 以 </thought> 标签结束独白。
-4. 在闭合标签后提供最终答案。
-请勿重复或引用之前的思考块；为本次对话创建全新的思考过程。
-`.trim() : '';
-
-    const finalSystemInstruction = `
-${assistant.instruction}
-${deepThinkingPrompt}
-`.trim();
-
-    const selectedModel = isDeepThinking ? this.reasoningModel : this.model;
-
-    const generationConfig: any = {
-      systemInstruction: finalSystemInstruction,
-    };
-
-    if (isDeepThinking) {
-      generationConfig.thinkingConfig = { 
-        thinkingBudget: 16000 
-      };
-    }
-
-    const chat = ai.chats.create({
-      model: selectedModel,
-      history: chatHistory,
-      config: generationConfig,
-    });
-
-    const result = await chat.sendMessageStream({ 
-      message: currentParts 
-    });
-
-    for await (const chunk of result) {
-      const response = chunk as GenerateContentResponse;
-      const text = response.text;
-      if (text) {
-        yield text;
-      }
+    } else {
+      yield "请先配置 N8N Webhook URL。";
     }
   }
 
-  private async *streamN8N(userInput: string, assistant: Assistant) {
+  private async *streamN8N(userInput: string, assistant: Assistant, attachments: Attachment[] = []) {
     try {
       let params = {};
       try {
@@ -110,9 +26,26 @@ ${deepThinkingPrompt}
         console.error("Params parse error", e);
       }
 
+      const imageUrls: string[] = [];
+      const fileUrls: string[] = [];
+
+      if (attachments && attachments.length > 0) {
+        for (const att of attachments) {
+          if (att.url) {
+            if (att.mimeType.startsWith('image/')) {
+              imageUrls.push(att.url);
+            } else {
+              fileUrls.push(att.url);
+            }
+          }
+        }
+      }
+
       const body = {
         ...params,
-        chatInput: userInput
+        chatInput: userInput,
+        imageUrls,
+        fileUrls
       };
 
       // Ensure URL is trimmed
@@ -155,8 +88,41 @@ ${deepThinkingPrompt}
               if (braceCount === 0) {
                 const jsonStr = buffer.substring(startIdx, i + 1);
                 try {
-                  const obj = JSON.parse(jsonStr);
+                  let cleanJsonStr = jsonStr.trim();
+                  // 处理 SSE 格式的 'data: ' 前缀
+                  if (cleanJsonStr.startsWith('data: ')) {
+                    cleanJsonStr = cleanJsonStr.slice(6).trim();
+                  }
+                  
+                  const obj = JSON.parse(cleanJsonStr);
+                  
+                  // 1. 如果对象本身包含 output 字段，发送覆盖信号
+                  if (obj.output !== undefined && obj.output !== null) {
+                    const outputStr = typeof obj.output === 'string' ? obj.output : JSON.stringify(obj.output);
+                    yield `__N8N_OVERRIDE__${outputStr}`;
+                    // 如果有 output，通常意味着这是最终结果，不再处理同级 content，避免覆盖后又被追加
+                    startIdx = i + 1;
+                    continue; 
+                  }
+                  
+                  // 2. 正常流式内容处理 (不使用 continue，确保 output 包含的 content 也能流式输出)
                   if (obj.type === 'item' && obj.content) {
+                    const content = obj.content;
+                    // 如果 content 是字符串且包含 output 的 JSON，则解析并发送覆盖信号
+                    if (typeof content === 'string' && content.trim().startsWith('{"output":')) {
+                      try {
+                        const inner = JSON.parse(content);
+                        if (inner.output !== undefined && inner.output !== null) {
+                          const innerOutputStr = typeof inner.output === 'string' ? inner.output : JSON.stringify(inner.output);
+                          yield `__N8N_OVERRIDE__${innerOutputStr}`;
+                        }
+                      } catch (e) {
+                        yield content; // 解析失败则按普通内容处理
+                      }
+                    } else {
+                      yield content;
+                    }
+                  } else if (obj.content) {
                     yield obj.content;
                   }
                 } catch (e) {

@@ -7,6 +7,7 @@ export enum Role {
 export interface Attachment {
   id: string;
   data?: string; // Base64 string (optional while loading)
+  url?: string;  // Remote URL after upload
   mimeType: string;
   name: string;
   isLoading?: boolean;
@@ -25,11 +26,9 @@ export interface Assistant {
   name: string;
   description: string;
   avatar: string;
-  instruction: string;
   color: string;
-  type?: 'regular' | 'n8n';
-  n8nUrl?: string;
-  n8nParams?: string; // JSON string
+  n8nUrl: string;
+  n8nParams: string; // JSON string
 }
 
 export interface ChatState {

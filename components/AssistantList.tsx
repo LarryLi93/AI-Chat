@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Assistant } from '../types';
-import { ChevronLeft, Check, Edit3, X, Save, Plus, Trash2, Globe, Sparkles, Terminal, Play, Loader2, Info, AlertCircle } from 'lucide-react';
+import { ChevronLeft, Check, Edit3, X, Save, Plus, Trash2, Globe, Play, Loader2, Info, AlertCircle } from 'lucide-react';
 
 interface AssistantListProps {
   assistants: Assistant[];
@@ -22,12 +22,10 @@ const AssistantEditor: React.FC<{
   const [formData, setFormData] = useState<Partial<Assistant>>({
     name: assistant?.name || '',
     description: assistant?.description || '',
-    instruction: assistant?.instruction || '',
-    type: assistant?.type || 'regular',
     n8nUrl: assistant?.n8nUrl || '',
     n8nParams: assistant?.n8nParams || '{\n  "chatInput": ""\n}',
-    avatar: assistant?.avatar || 'bg-gradient-to-tr from-blue-400 to-indigo-500',
-    color: assistant?.color || 'bg-blue-500'
+    avatar: assistant?.avatar || 'bg-gradient-to-tr from-indigo-400 to-purple-500',
+    color: assistant?.color || 'bg-indigo-500'
   });
   
   const [isTesting, setIsTesting] = useState(false);
@@ -100,24 +98,6 @@ const AssistantEditor: React.FC<{
           </div>
 
           <div className="space-y-9">
-            {/* Mode Switcher */}
-            <div className="bg-gray-50 p-1.5 rounded-[30px] border border-gray-100 flex shadow-inner">
-              <button 
-                onClick={() => setFormData({...formData, type: 'regular'})}
-                className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-[26px] text-[13px] font-bold transition-all duration-500 ${formData.type === 'regular' ? 'bg-white shadow-md text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
-              >
-                <Sparkles size={16} />
-                常规助手
-              </button>
-              <button 
-                onClick={() => setFormData({...formData, type: 'n8n'})}
-                className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-[26px] text-[13px] font-bold transition-all duration-500 ${formData.type === 'n8n' ? 'bg-white shadow-md text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
-              >
-                <Globe size={16} />
-                N8N 工作流
-              </button>
-            </div>
-
             <div className="space-y-7">
               {/* Name */}
               <div>
@@ -125,7 +105,7 @@ const AssistantEditor: React.FC<{
                 <input 
                   value={formData.name}
                   onChange={e => setFormData({...formData, name: e.target.value})}
-                  placeholder="例如：灵汐"
+                  placeholder="例如：N8N 助手"
                   className="w-full px-6 py-4.5 bg-gray-50/50 border border-gray-100 rounded-[24px] text-[15px] text-gray-900 focus:ring-4 focus:ring-blue-500/5 focus:bg-white outline-none transition-all placeholder:text-gray-300"
                 />
               </div>
@@ -141,72 +121,60 @@ const AssistantEditor: React.FC<{
                 />
               </div>
 
-              {formData.type === 'regular' ? (
-                <div className="animate-in fade-in slide-in-from-top-3 duration-500">
-                  <label className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em] ml-2 mb-2.5 block">系统提示词 (Prompt)</label>
-                  <textarea
-                    value={formData.instruction}
-                    onChange={e => setFormData({...formData, instruction: e.target.value})}
-                    className="w-full h-48 p-7 bg-gray-50/50 border border-gray-100 rounded-[32px] text-[15px] text-gray-900 font-light leading-relaxed resize-none focus:ring-4 focus:ring-blue-500/5 focus:bg-white outline-none transition-all no-scrollbar"
-                    placeholder="定义助手的身份、语气和行为规范..."
+              <div className="space-y-7 animate-in fade-in slide-in-from-top-3 duration-500">
+                <div>
+                  <div className="flex items-center justify-between mb-2.5 px-1">
+                    <label className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em] block">Webhook URL</label>
+                    <div className="group relative">
+                      <Info size={14} className="text-gray-300 cursor-help" />
+                      <div className="absolute bottom-full right-0 mb-3 w-60 p-4 bg-gray-900 text-white text-[10px] rounded-[18px] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 shadow-2xl leading-relaxed">
+                        必须使用 HTTPS 且后端配置跨域 (CORS)。
+                      </div>
+                    </div>
+                  </div>
+                  <input 
+                    value={formData.n8nUrl}
+                    onChange={e => setFormData({...formData, n8nUrl: e.target.value})}
+                    placeholder="https://n8n.example.com/webhook/..."
+                    className="w-full px-6 py-4 bg-gray-50/50 border border-gray-100 rounded-[20px] text-[12px] text-gray-900 font-mono focus:ring-4 focus:ring-blue-500/5 focus:bg-white outline-none transition-all"
                   />
                 </div>
-              ) : (
-                <div className="space-y-7 animate-in fade-in slide-in-from-top-3 duration-500">
-                  <div>
-                    <div className="flex items-center justify-between mb-2.5 px-1">
-                      <label className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em] block">Webhook URL</label>
-                      <div className="group relative">
-                        <Info size={14} className="text-gray-300 cursor-help" />
-                        <div className="absolute bottom-full right-0 mb-3 w-60 p-4 bg-gray-900 text-white text-[10px] rounded-[18px] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 shadow-2xl leading-relaxed">
-                          必须使用 HTTPS 且后端配置跨域 (CORS)。
-                        </div>
-                      </div>
-                    </div>
-                    <input 
-                      value={formData.n8nUrl}
-                      onChange={e => setFormData({...formData, n8nUrl: e.target.value})}
-                      placeholder="https://n8n.example.com/webhook/..."
-                      className="w-full px-6 py-4 bg-gray-50/50 border border-gray-100 rounded-[20px] text-[12px] text-gray-900 font-mono focus:ring-4 focus:ring-blue-500/5 focus:bg-white outline-none transition-all"
+                
+                <div>
+                  <div className="flex items-center justify-between mb-2.5 px-1">
+                    <label className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em] block">请求参数 (JSON)</label>
+                    <button 
+                      onClick={handleTest}
+                      disabled={isTesting || !formData.n8nUrl}
+                      className="text-[10px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-blue-50 transition-all active:scale-95 disabled:opacity-50"
+                    >
+                      {isTesting ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} fill="currentColor" />}
+                      测试链接
+                    </button>
+                  </div>
+                  <div className="relative group/editor">
+                    <textarea
+                      value={formData.n8nParams}
+                      onChange={e => setFormData({...formData, n8nParams: e.target.value})}
+                      className="w-full h-48 p-7 bg-[#0d1117] border border-gray-800 rounded-[34px] text-[13px] text-blue-200 font-mono resize-none outline-none focus:ring-4 focus:ring-blue-500/10 transition-all no-scrollbar shadow-xl"
+                      spellCheck={false}
                     />
+                    <div className="absolute top-5 right-6 text-[8px] font-bold text-gray-500 uppercase tracking-[0.3em] opacity-40">Editor</div>
                   </div>
                   
-                  <div>
-                    <div className="flex items-center justify-between mb-2.5 px-1">
-                      <label className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em] block">请求参数 (JSON)</label>
-                      <button 
-                        onClick={handleTest}
-                        disabled={isTesting || !formData.n8nUrl}
-                        className="text-[10px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-blue-50 transition-all active:scale-95 disabled:opacity-50"
-                      >
-                        {isTesting ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} fill="currentColor" />}
-                        测试链接
-                      </button>
-                    </div>
-                    <div className="relative group/editor">
-                      <textarea
-                        value={formData.n8nParams}
-                        onChange={e => setFormData({...formData, n8nParams: e.target.value})}
-                        className="w-full h-48 p-7 bg-[#0d1117] border border-gray-800 rounded-[34px] text-[13px] text-blue-200 font-mono resize-none outline-none focus:ring-4 focus:ring-blue-500/10 transition-all no-scrollbar shadow-xl"
-                        spellCheck={false}
-                      />
-                      <div className="absolute top-5 right-6 text-[8px] font-bold text-gray-500 uppercase tracking-[0.3em] opacity-40">Editor</div>
-                    </div>
-                    
-                    {testResult && (
-                      <div className={`mt-5 p-5 rounded-[28px] text-[11px] font-mono border whitespace-pre-wrap max-h-40 overflow-y-auto no-scrollbar animate-in fade-in zoom-in-95 leading-relaxed ${
-                        testResult.isError ? 'bg-red-50 text-red-500 border-red-100 shadow-inner' : 'bg-gray-50 text-gray-500 border-gray-100'
-                      }`}>
-                        <div className="flex items-center gap-2 mb-2 font-bold uppercase tracking-widest text-[9px] opacity-60">
-                          {testResult.isError ? <AlertCircle size={12} /> : <div className="w-1 h-1 rounded-full bg-current" />}
-                          测试报告
-                        </div>
-                        {testResult.message}
+                  {testResult && (
+                    <div className={`mt-5 p-5 rounded-[28px] text-[11px] font-mono border whitespace-pre-wrap max-h-40 overflow-y-auto no-scrollbar animate-in fade-in zoom-in-95 leading-relaxed ${
+                      testResult.isError ? 'bg-red-50 text-red-500 border-red-100 shadow-inner' : 'bg-gray-50 text-gray-500 border-gray-100'
+                    }`}>
+                      <div className="flex items-center gap-2 mb-2 font-bold uppercase tracking-widest text-[9px] opacity-60">
+                        {testResult.isError ? <AlertCircle size={12} /> : <div className="w-1 h-1 rounded-full bg-current" />}
+                        测试报告
                       </div>
-                    )}
-                  </div>
+                      {testResult.message}
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           </div>
         </div>
@@ -297,31 +265,22 @@ export const AssistantList: React.FC<AssistantListProps> = ({
             <div key={assistant.id} className="relative group">
               <button
                 onClick={() => onSelect(assistant)}
-                className={`w-full flex items-center gap-5 p-5 rounded-[40px] transition-all duration-500 border ${
+                className={`w-full flex items-center gap-5 p-5 rounded-[40px] transition-all duration-500 border-2 ${
                   selectedId === assistant.id 
-                    ? 'bg-white border-blue-100 shadow-2xl shadow-blue-50/50 translate-x-1' 
+                    ? 'bg-white border-blue-500 shadow-2xl shadow-blue-100/50 translate-x-1' 
                     : 'bg-white/40 border-gray-100 hover:bg-white hover:border-gray-200'
                 }`}
               >
                 <div className={`w-16 h-16 rounded-[24px] ${assistant.avatar} flex items-center justify-center text-white text-2xl font-bold shadow-sm flex-shrink-0`}>
-                  {assistant.type === 'n8n' ? <Globe size={28} /> : assistant.name.charAt(0)}
+                  <Globe size={28} />
                 </div>
                 
-                <div className="flex-1 text-left pr-12">
+                <div className="flex-1 text-left">
                   <div className="flex items-center gap-2 mb-1">
                     <h3 className="font-outfit font-bold text-gray-800 text-[18px] tracking-tight">{assistant.name}</h3>
-                    {assistant.type === 'n8n' && (
-                      <span className="text-[8px] px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded-lg font-bold uppercase tracking-widest border border-indigo-100/50">Workflow</span>
-                    )}
                   </div>
                   <p className="text-[14px] text-gray-400 line-clamp-1 font-light leading-relaxed">{assistant.description}</p>
                 </div>
-
-                {selectedId === assistant.id && (
-                  <div className="absolute top-1/2 -translate-y-1/2 right-7 w-8 h-8 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center">
-                    <Check size={18} strokeWidth={3} />
-                  </div>
-                )}
               </button>
               
               <div className={`absolute top-1/2 -translate-y-1/2 right-5 flex gap-2 transition-all duration-300 ${selectedId === assistant.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>

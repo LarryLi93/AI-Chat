@@ -6,15 +6,17 @@ import rehypeKatex from 'rehype-katex';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Message, Role } from '../types';
-import { FileText, ChevronDown, ChevronUp, Brain, Loader2 } from 'lucide-react';
+import { FileText, ChevronDown, ChevronUp, Brain, Loader2, RefreshCw } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: Message;
   senderName: string;
   isLast?: boolean;
+  isStreaming?: boolean;
+  onRegenerate?: () => void;
 }
 
-const CodeBlock: React.FC<{ code: string; language: string }> = ({ code, language }) => {
+const CodeBlock = React.memo(({ code, language }: { code: string; language: string }) => {
   return (
     <div className="relative my-5 overflow-hidden rounded-2xl border border-black/10 shadow-lg text-left">
       <div className="absolute top-3 right-3 z-10 opacity-40 hover:opacity-100 transition-opacity">
@@ -38,9 +40,9 @@ const CodeBlock: React.FC<{ code: string; language: string }> = ({ code, languag
       </SyntaxHighlighter>
     </div>
   );
-};
+});
 
-const ThinkingProcess: React.FC<{ content: string; isStreaming?: boolean }> = ({ content, isStreaming }) => {
+const ThinkingProcess: React.FC<{ content: string; isStreaming?: boolean }> = React.memo(({ content, isStreaming }) => {
   const [isExpanded, setIsExpanded] = useState(true);
   const wasStreaming = useRef(isStreaming);
 
@@ -66,7 +68,7 @@ const ThinkingProcess: React.FC<{ content: string; isStreaming?: boolean }> = ({
       </button>
       {isExpanded && (
         <div className="mt-2 text-[13px] text-gray-500/80 leading-relaxed font-light italic animate-in fade-in slide-in-from-top-1 duration-300">
-          <ReactMarkdown 
+          <MemoizedReactMarkdown 
             remarkPlugins={[remarkGfm, remarkMath]} 
             rehypePlugins={[rehypeKatex]}
             components={{
@@ -84,18 +86,24 @@ const ThinkingProcess: React.FC<{ content: string; isStreaming?: boolean }> = ({
             }}
           >
             {content}
-          </ReactMarkdown>
+          </MemoizedReactMarkdown>
           {isStreaming && <span className="inline-block w-1.5 h-3 ml-1 bg-blue-400/50 animate-pulse" />}
         </div>
       )}
     </div>
   );
-};
+});
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderName, isLast }) => {
+const MemoizedReactMarkdown = React.memo(ReactMarkdown);
+
+export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message, senderName, isLast, isStreaming, onRegenerate }) => {
   const isUser = message.role === Role.USER;
+  // 使用更宽松的判断：只要 content 有任何非空字符，就认为是有内容的
+  const hasContent = message.content.length > 0;
 
-  if (!isUser && !message.content.trim()) {
+  if (!isUser && !hasContent && isStreaming && isLast) {
+    // 只有当是最后一条消息、正在流式输出中且内容完全为空时，才显示“思考中”
+    // 如果不是最后一条消息，或者已经停止流式输出，即便内容为空也不应该卡在思考中
     return (
       <div className="flex w-full mb-5 animate-in fade-in slide-in-from-bottom-2 duration-500 justify-start">
         <div className="max-w-[96%] text-left">
@@ -165,7 +173,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderNam
 
           {(mainContent || (isLast && hasClosingTag)) && (
             <div className={`prose-aura ${isUser ? 'text-gray-900 font-medium' : 'text-gray-800'}`}>
-              <ReactMarkdown 
+              <MemoizedReactMarkdown 
                 remarkPlugins={[remarkGfm, remarkMath]} 
                 rehypePlugins={[rehypeKatex]}
                 components={{
@@ -183,7 +191,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderNam
                 }}
               >
                 {mainContent}
-              </ReactMarkdown>
+              </MemoizedReactMarkdown>
               {!isUser && isLast && mainContent === '' && hasClosingTag && (
                 <span className="inline-block w-1.5 h-3 bg-blue-400/50 animate-pulse" />
               )}
@@ -191,10 +199,22 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, senderNam
           )}
         </div>
 
-        <div className={`mt-2 text-[9px] font-bold uppercase tracking-widest opacity-20 ${isUser ? 'mr-2' : 'ml-2'}`}>
-          {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        <div className={`mt-2 flex items-center gap-3 ${isUser ? 'justify-end mr-2' : 'justify-start ml-2'}`}>
+          <div className="text-[9px] font-bold uppercase tracking-widest opacity-20">
+            {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
+          {!isUser && isLast && !isStreaming && onRegenerate && (
+            <button 
+              onClick={onRegenerate}
+              className="flex items-center gap-1.5 text-[10px] font-bold text-blue-500/60 uppercase tracking-wider hover:text-blue-600 transition-colors active:scale-95 group"
+              title="重新回答"
+            >
+              <RefreshCw size={10} className="group-hover:rotate-180 transition-transform duration-500" />
+              <span>重新回答</span>
+            </button>
+          )}
         </div>
       </div>
     </div>
   );
-};
+});
