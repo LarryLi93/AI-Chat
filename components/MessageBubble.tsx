@@ -7,6 +7,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Message, Role } from '../types';
 import { FileText, ChevronDown, ChevronUp, Brain, Loader2, RefreshCw } from 'lucide-react';
+import JsonFormRenderer from './JsonFormRenderer';
 
 interface MessageBubbleProps {
   message: Message;
@@ -14,6 +15,7 @@ interface MessageBubbleProps {
   isLast?: boolean;
   isStreaming?: boolean;
   onRegenerate?: () => void;
+  onAction?: (action: string, data: any) => void;
 }
 
 const CodeBlock = React.memo(({ code, language }: { code: string; language: string }) => {
@@ -96,14 +98,40 @@ const ThinkingProcess: React.FC<{ content: string; isStreaming?: boolean }> = Re
 
 const MemoizedReactMarkdown = React.memo(ReactMarkdown);
 
-export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message, senderName, isLast, isStreaming, onRegenerate }) => {
+export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message, senderName, isLast, isStreaming, onRegenerate, onAction }) => {
   const isUser = message.role === Role.USER;
   // 使用更宽松的判断：只要 content 有任何非空字符，就认为是有内容的
   const hasContent = message.content.length > 0;
 
+  // 检测是否为 JSON 格式
+  let jsonContent = null;
+  const thoughtRegex = /<thought>([\s\S]*?)(?:<\/thought>|$)/i;
+  const thoughtMatch = message.content.match(thoughtRegex);
+  const hasClosingTag = message.content.includes('</thought>');
+  const mainContent = hasClosingTag 
+    ? message.content.split('</thought>')[1].trim()
+    : (thoughtMatch ? '' : message.content.trim());
+  
+  const trimmedContent = mainContent.trim();
+  let jsonToParse = trimmedContent;
+  const jsonBlockMatch = trimmedContent.match(/^```json\s*([\s\S]*?)\s*```$/i) || trimmedContent.match(/^```\s*([\s\S]*?)\s*```$/i);
+  if (jsonBlockMatch) {
+    jsonToParse = jsonBlockMatch[1].trim();
+  }
+
+  if (!isUser && (jsonToParse.startsWith('{') && jsonToParse.endsWith('}'))) {
+    try {
+      const parsed = JSON.parse(jsonToParse);
+      // 只有在内容包含 "表单标题" 字段时才渲染为表单
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && '表单标题' in parsed) {
+        jsonContent = parsed;
+      }
+    } catch (e) {
+      jsonContent = null;
+    }
+  }
+
   if (!isUser && !hasContent && isStreaming && isLast) {
-    // 只有当是最后一条消息、正在流式输出中且内容完全为空时，才显示“思考中”
-    // 如果不是最后一条消息，或者已经停止流式输出，即便内容为空也不应该卡在思考中
     return (
       <div className="flex w-full mb-5 animate-in fade-in slide-in-from-bottom-2 duration-500 justify-start">
         <div className="max-w-[96%] text-left">
@@ -119,28 +147,21 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
     );
   }
 
-  const thoughtRegex = /<thought>([\s\S]*?)(?:<\/thought>|$)/i;
-  const thoughtMatch = message.content.match(thoughtRegex);
   const thoughtContent = thoughtMatch ? thoughtMatch[1] : null;
-  
-  const hasClosingTag = message.content.includes('</thought>');
-  const mainContent = hasClosingTag 
-    ? message.content.split('</thought>')[1].trim()
-    : (thoughtMatch ? '' : message.content.trim());
 
   return (
     <div className={`flex w-full mb-5 animate-in fade-in slide-in-from-bottom-2 duration-500 ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div className={`max-w-[96%] ${isUser ? 'text-right' : 'text-left'}`}>
+      <div className={`${jsonContent ? 'w-[98%]' : 'max-w-[96%]'} ${isUser ? 'text-right' : 'text-left'}`}>
         
         <div className={`mb-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400/80 px-1 ${isUser ? 'mr-1' : 'ml-1'}`}>
           {senderName}
         </div>
 
         <div className={`
-          relative px-5 py-3.5 text-left
+          relative text-left
           ${isUser 
-            ? 'bg-blue-50 border border-blue-100/50 rounded-[26px] rounded-tr-none text-gray-900 shadow-sm' 
-            : 'bg-white border border-gray-100 rounded-[26px] rounded-tl-none text-gray-800 shadow-sm'
+            ? 'px-5 py-3.5 bg-blue-50 border border-blue-100/50 rounded-[26px] rounded-tr-none text-gray-900 shadow-sm' 
+            : `bg-white border border-gray-100 rounded-[26px] rounded-tl-none text-gray-800 shadow-sm overflow-hidden ${jsonContent ? 'p-0' : 'px-5 py-3.5'}`
           }
         `}>
           {message.attachments && message.attachments.length > 0 && (
@@ -171,31 +192,35 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(({ message
             />
           )}
 
-          {(mainContent || (isLast && hasClosingTag)) && (
-            <div className={`prose-aura ${isUser ? 'text-gray-900 font-medium' : 'text-gray-800'}`}>
-              <MemoizedReactMarkdown 
-                remarkPlugins={[remarkGfm, remarkMath]} 
-                rehypePlugins={[rehypeKatex]}
-                components={{
-                  code({ node, inline, className, children, ...props }: any) {
-                    const match = /language-(\w+)/.exec(className || '');
-                    if (!inline && match) {
-                      return <CodeBlock code={String(children).replace(/\n$/, '')} language={match[1]} />;
+          {jsonContent ? (
+            <JsonFormRenderer data={jsonContent} onAction={onAction} />
+          ) : (
+            (mainContent || (isLast && hasClosingTag)) && (
+              <div className={`prose-aura ${isUser ? 'text-gray-900 font-medium' : 'text-gray-800'}`}>
+                <MemoizedReactMarkdown 
+                  remarkPlugins={[remarkGfm, remarkMath]} 
+                  rehypePlugins={[rehypeKatex]}
+                  components={{
+                    code({ node, inline, className, children, ...props }: any) {
+                      const match = /language-(\w+)/.exec(className || '');
+                      if (!inline && match) {
+                        return <CodeBlock code={String(children).replace(/\n$/, '')} language={match[1]} />;
+                      }
+                      return (
+                        <code className={className} {...props}>
+                          {children}
+                        </code>
+                      );
                     }
-                    return (
-                      <code className={className} {...props}>
-                        {children}
-                      </code>
-                    );
-                  }
-                }}
-              >
-                {mainContent}
-              </MemoizedReactMarkdown>
-              {!isUser && isLast && mainContent === '' && hasClosingTag && (
-                <span className="inline-block w-1.5 h-3 bg-blue-400/50 animate-pulse" />
-              )}
-            </div>
+                  }}
+                >
+                  {mainContent}
+                </MemoizedReactMarkdown>
+                {!isUser && isLast && mainContent === '' && hasClosingTag && (
+                  <span className="inline-block w-1.5 h-3 bg-blue-400/50 animate-pulse" />
+                )}
+              </div>
+            )
           )}
         </div>
 

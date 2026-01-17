@@ -58,6 +58,7 @@ const App: React.FC = () => {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [isCancelTargeted, setIsCancelTargeted] = useState(false);
+  const isCancelTargetedRef = useRef(false);
   const [liveTranscript, setLiveTranscript] = useState('');
   const [inputMode, setInputMode] = useState<'voice' | 'text'>('voice');
   const [view, setView] = useState<'chat' | 'assistants'>('chat');
@@ -381,6 +382,7 @@ const App: React.FC = () => {
       
       setIsRecording(true);
       setIsCancelTargeted(false);
+      isCancelTargetedRef.current = false;
       
       if ('touches' in e) {
         touchStartY.current = (e as React.TouchEvent).touches[0].clientY;
@@ -399,8 +401,10 @@ const App: React.FC = () => {
     const diff = touchStartY.current - currentY;
     if (diff > 80) {
       setIsCancelTargeted(true);
+      isCancelTargetedRef.current = true;
     } else {
       setIsCancelTargeted(false);
+      isCancelTargetedRef.current = false;
     }
   };
 
@@ -417,25 +421,28 @@ const App: React.FC = () => {
 
       if (mediaRecorderRef.current) {
         mediaRecorderRef.current.onstop = async () => {
-          if (shouldSend && !isCancelTargeted && (audioChunksRef.current.length > 0 || transcriptRef.current)) {
-            const audioBlob = audioChunksRef.current.length > 0 
+          const finalTranscript = transcriptRef.current.trim();
+          const hasAudio = audioChunksRef.current.length > 0;
+
+          // 只有在非取消状态，且识别出文字时才发送
+          // 如果用户没有取消，但识别到了文字，则发送
+          if (shouldSend && !isCancelTargetedRef.current && finalTranscript) {
+            const audioBlob = hasAudio 
               ? new Blob(audioChunksRef.current, { type: mediaRecorderRef.current?.mimeType || 'audio/webm' }) 
               : null;
             
-            const textToSend = transcriptRef.current;
-
             if (audioBlob) {
               const reader = new FileReader();
               reader.onloadend = () => {
                 const base64Audio = (reader.result as string).split(',')[1];
-                processSend(textToSend || undefined, { 
+                processSend(finalTranscript, { 
                   data: base64Audio, 
                   mimeType: audioBlob.type 
                 });
               };
               reader.readAsDataURL(audioBlob);
             } else {
-              processSend(textToSend);
+              processSend(finalTranscript);
             }
           }
           mediaRecorderRef.current?.stream.getTracks().forEach(track => track.stop());
@@ -446,6 +453,7 @@ const App: React.FC = () => {
       
       setIsRecording(false);
       setIsCancelTargeted(false);
+      isCancelTargetedRef.current = false;
     }, 400);
   };
 
@@ -461,6 +469,16 @@ const App: React.FC = () => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       processSend();
+    }
+  };
+
+  const handleMessageAction = (action: string, data: any) => {
+    if (action === 'confirm') {
+      // 发送修改后的完整 JSON 数据给后端，以便后端处理
+      const summary = `我已确认并修改了数据，请按照以下 JSON 内容进行后续处理：\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
+      processSend(summary);
+    } else if (action === 'cancel') {
+      // 取消操作不再发送消息，仅在前端显示状态
     }
   };
 
@@ -520,6 +538,7 @@ const App: React.FC = () => {
                   isLast={index === state.messages.length - 1} 
                   isStreaming={state.isStreaming}
                   onRegenerate={handleRegenerate}
+                  onAction={handleMessageAction}
                 />
               ))}
               {state.error && (
