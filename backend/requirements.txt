@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+pymysql
+DBUtils
+pydantic
+requests

@@ -3,9 +3,10 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Layout } from './components/Layout';
 import { MessageBubble } from './components/MessageBubble';
 import { AssistantList } from './components/AssistantList';
-import { Message, Role, ChatState, Attachment, Assistant } from './types';
+import { ProductDetailView, ProductListView } from './components/ProductListRenderer';
+import { Message, Role, ChatState, Attachment, Assistant, Product } from './types';
 import { geminiService } from './services/geminiService';
-import { Camera, Keyboard as KeyboardIcon, Mic, X, AlertCircle, ArrowUp, Trash2, Loader2, FileText } from 'lucide-react';
+import { Keyboard as KeyboardIcon, Mic, X, AlertCircle, ArrowUp, Trash2, Loader2, Image, Paperclip } from 'lucide-react';
 
 const INITIAL_ASSISTANTS: Assistant[] = [
   {
@@ -15,7 +16,11 @@ const INITIAL_ASSISTANTS: Assistant[] = [
     avatar: 'bg-gradient-to-tr from-indigo-500 to-purple-600',
     color: 'bg-indigo-500',
     n8nUrl: '',
-    n8nParams: '{\n  "chatInput": ""\n}'
+    n8nParams: '{\n  "chatInput": ""\n}',
+    detailUrl: 'https://agent-flow.wyoooni.net/api/get_product_detail',
+    detailField: 'code',
+    suggestionUrl: '',
+    suggestionParams: ''
   }
 ];
 
@@ -42,7 +47,18 @@ const App: React.FC = () => {
         const parsed = JSON.parse(saved) as any[];
         // 只保留具有 n8nUrl 属性的助手（兼容旧版本数据）
         const filtered = parsed.filter(a => 'n8nUrl' in a);
-        return filtered.length > 0 ? filtered : INITIAL_ASSISTANTS;
+        // 确保每个助手都有 detailUrl 和 detailField，如果缺失则从 INITIAL_ASSISTANTS 中对应的项或第一项获取
+        const migrated = filtered.map(a => {
+          const initial = INITIAL_ASSISTANTS.find(ia => ia.id === a.id) || INITIAL_ASSISTANTS[0];
+          // 如果旧助手的 detailUrl 是旧地址，则强制更新为新地址
+          const isOldUrl = a.detailUrl === 'http://139.196.198.169:8012/api/product_detail';
+          return {
+            ...a,
+            detailUrl: (isOldUrl || !a.detailUrl) ? initial.detailUrl : a.detailUrl,
+            detailField: a.detailField || initial.detailField
+          };
+        });
+        return migrated.length > 0 ? migrated : INITIAL_ASSISTANTS;
       } catch (e) {
         return INITIAL_ASSISTANTS;
       }
@@ -61,8 +77,15 @@ const App: React.FC = () => {
   const isCancelTargetedRef = useRef(false);
   const [liveTranscript, setLiveTranscript] = useState('');
   const [inputMode, setInputMode] = useState<'voice' | 'text'>('voice');
-  const [view, setView] = useState<'chat' | 'assistants'>('chat');
+  const [view, setView] = useState<'chat' | 'assistants' | 'productDetail' | 'productList'>('chat');
+  const [detailReturnView, setDetailReturnView] = useState<'chat' | 'productList'>('chat');
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [productListGroups, setProductListGroups] = useState<any[]>([]);
+  const [initialGroupIndex, setInitialGroupIndex] = useState(0);
   const [selectedAssistantId, setSelectedAssistantId] = useState<string>(assistants[0].id);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [chatScrollTop, setChatScrollTop] = useState(0);
+  const [productListScrollTop, setProductListScrollTop] = useState(0);
 
   const selectedAssistant = assistants.find(a => a.id === selectedAssistantId) || assistants[0];
 
@@ -81,12 +104,25 @@ const App: React.FC = () => {
   const touchStartY = useRef<number>(0);
   const transcriptRef = useRef<string>('');
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+  // 当切换回聊天视图时恢复滚动位置
+  useEffect(() => {
+    if (view === 'chat' && chatScrollTop > 0 && scrollRef.current) {
+      // 使用 setTimeout 确保 DOM 已经渲染并布局完成
+      const timer = setTimeout(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = chatScrollTop;
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [view, chatScrollTop]);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth', force: boolean = false) => {
     if (scrollRef.current) {
       const { scrollHeight, clientHeight, scrollTop } = scrollRef.current;
-      const isNearBottom = scrollHeight - clientHeight - scrollTop < 100;
+      const isNearBottom = scrollHeight - clientHeight - scrollTop < 150;
       
-      if (isNearBottom || behavior === 'auto') {
+      if (isNearBottom || force) {
         // 使用 requestAnimationFrame 确保在下一帧渲染前滚动，减少抖动
         requestAnimationFrame(() => {
           if (scrollRef.current) {
@@ -96,6 +132,18 @@ const App: React.FC = () => {
             });
           }
         });
+        
+        // 如果是强制滚动（如用户提问后），增加一个延时滚动以确保捕获动态高度变化
+        if (force) {
+          setTimeout(() => {
+            if (scrollRef.current) {
+              scrollRef.current.scrollTo({
+                top: scrollRef.current.scrollHeight,
+                behavior: 'smooth',
+              });
+            }
+          }, 100);
+        }
       }
     }
   }, []);
@@ -103,16 +151,23 @@ const App: React.FC = () => {
   // 监听消息变化，自动滚动到底部
   useEffect(() => {
     if (state.messages.length > 0) {
-      // 如果正在流式输出，使用 instant 滚动避免抖动
+      const lastMessage = state.messages[state.messages.length - 1];
+      const secondLastMessage = state.messages.length >= 2 ? state.messages[state.messages.length - 2] : null;
+      
+      // 如果最后一条是用户消息，或者最后一条是 AI 占位符且前一条是用户消息（刚发送提问）
+      const isUserAction = lastMessage.role === Role.USER || 
+                          (lastMessage.role === Role.MODEL && secondLastMessage?.role === Role.USER && lastMessage.content === '');
+      
       const behavior = state.isStreaming ? 'auto' : 'smooth';
-      scrollToBottom(behavior);
+      scrollToBottom(behavior, isUserAction);
     }
   }, [state.messages.length, scrollToBottom]); // 仅在消息数量变化时触发
 
   // 处理流式输出过程中的滚动
   useEffect(() => {
     if (state.isStreaming) {
-      scrollToBottom('auto');
+      // 流式输出时不强制滚动，只有当用户本就在底部时才随动
+      scrollToBottom('auto', false);
     }
   }, [state.messages[state.messages.length - 1]?.content, state.isStreaming, scrollToBottom]);
 
@@ -150,6 +205,7 @@ const App: React.FC = () => {
 
   const handleAssistantSelect = (assistant: Assistant) => {
     setSelectedAssistantId(assistant.id);
+    setSuggestions([]);
     setState(prev => ({
       ...prev,
       messages: [],
@@ -164,72 +220,6 @@ const App: React.FC = () => {
 
   const handleAddAssistant = (newAssistant: Assistant) => {
     setAssistants(prev => [...prev, newAssistant]);
-  };
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-
-    const newFiles = Array.from(files) as File[];
-    
-    const placeholders: Attachment[] = newFiles.map(file => ({
-      id: Math.random().toString(36).substring(7),
-      name: file.name,
-      mimeType: file.type || 'application/octet-stream',
-      isLoading: true
-    }));
-
-    setAttachments(prev => [...prev, ...placeholders]);
-
-    newFiles.forEach(async (file, index) => {
-      const targetId = placeholders[index].id;
-      
-      try {
-        // 1. Get Base64 for local preview
-        const reader = new FileReader();
-        reader.onload = async () => {
-          const base64 = (reader.result as string).split(',')[1];
-          
-          // 2. Upload to server
-          const formData = new FormData();
-          formData.append('file', file);
-
-          try {
-            const uploadRes = await fetch('http://localhost:3001/upload', {
-              method: 'POST',
-              body: formData
-            });
-
-            if (uploadRes.ok) {
-              const { url } = await uploadRes.json();
-              setAttachments(prev => prev.map(att => 
-                att.id === targetId 
-                  ? { ...att, data: base64, url, isLoading: false } 
-                  : att
-              ));
-            } else {
-              throw new Error('Upload failed');
-            }
-          } catch (error) {
-            console.error('Error uploading file:', error);
-            setAttachments(prev => prev.map(att => 
-              att.id === targetId 
-                ? { ...att, data: base64, isLoading: false } 
-                : att
-            ));
-          }
-        };
-        reader.readAsDataURL(file);
-      } catch (error) {
-        console.error('Error processing file:', error);
-      }
-    });
-
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  const removeAttachment = (id: string) => {
-    setAttachments(prev => prev.filter(att => att.id !== id));
   };
 
   const getSupportedMimeType = () => {
@@ -286,9 +276,10 @@ const App: React.FC = () => {
     setAttachments([]);
     setLiveTranscript('');
     transcriptRef.current = '';
+    setSuggestions([]);
 
+    let fullContent = '';
     try {
-      let fullContent = '';
       const stream = geminiService.streamChat(
         baseHistory, 
         finalInput.trim(), 
@@ -320,10 +311,93 @@ const App: React.FC = () => {
           isStreaming: true
         }));
       }
+
+      // 检查是否包含意图和建议
+      try {
+        let jsonToParse = '';
+        const jsonBlockMatch = fullContent.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+        if (jsonBlockMatch) {
+          jsonToParse = jsonBlockMatch[1].trim();
+        } else {
+          // 尝试寻找最外层的 { }
+          const firstCurly = fullContent.indexOf('{');
+          const lastCurly = fullContent.lastIndexOf('}');
+          if (firstCurly !== -1 && lastCurly > firstCurly) {
+            jsonToParse = fullContent.substring(firstCurly, lastCurly + 1);
+          }
+        }
+
+        if (jsonToParse) {
+          const parsed = JSON.parse(jsonToParse);
+          const lastIdx = currentMessages.length - 1;
+          if (currentMessages[lastIdx].role === Role.MODEL) {
+            // 提取建议
+            const advice = parsed.advice || parsed.suggestions || (parsed.response && (parsed.response.advice || parsed.response.suggestions));
+            
+            currentMessages[lastIdx] = {
+              ...currentMessages[lastIdx],
+              intent: parsed.intent || (parsed.response && parsed.response.intent),
+              advice: Array.isArray(advice) ? advice : undefined
+            };
+            
+            // 重要：同步状态以触发重渲染
+            setState(prev => ({
+              ...prev,
+              messages: [...currentMessages]
+            }));
+          }
+        }
+      } catch (e) {
+        // 忽略解析错误
+      }
     } catch (err) {
       setState(prev => ({ ...prev, error: '发生了预料之外的错误。请重试。' }));
     } finally {
       setState(prev => ({ ...prev, isStreaming: false }));
+      
+      // 获取建议/追问
+      if (selectedAssistant.suggestionUrl) {
+        fetchSuggestions(displayContent, fullContent);
+      }
+    }
+  };
+
+  const fetchSuggestions = async (userInput: string, aiResponse: string) => {
+    try {
+      let params = {};
+      try {
+        params = selectedAssistant.suggestionParams ? JSON.parse(selectedAssistant.suggestionParams) : {};
+      } catch (e) {
+        console.error("Suggestion params parse error", e);
+      }
+
+      const response = await fetch(selectedAssistant.suggestionUrl!, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          number: 3,
+          size: 15,
+          "tone_style ": "面料知识专家",
+          relevance_focus: "贴合面料使用的场景",
+          business_goal: "面料",
+          ...params,
+          question: userInput,
+          answer: aiResponse,
+        })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        // 优先从 questions 字段获取建议，兼容旧格式
+        if (data.questions && Array.isArray(data.questions)) {
+          setSuggestions(data.questions);
+        } else if (data.suggestions && Array.isArray(data.suggestions)) {
+          setSuggestions(data.suggestions);
+        } else if (Array.isArray(data)) {
+          setSuggestions(data);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch suggestions", err);
     }
   };
 
@@ -458,11 +532,68 @@ const App: React.FC = () => {
   };
 
   const clearChat = () => {
+    setSuggestions([]);
     setState(prev => ({
       ...prev,
       messages: [],
       error: null
     }));
+    setAttachments([]);
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const id = Math.random().toString(36).substring(7);
+      
+      const attachment: Attachment = {
+        id,
+        name: file.name,
+        mimeType: file.type,
+        isLoading: true
+      };
+      
+      setAttachments(prev => [...prev, attachment]);
+
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch('http://localhost:3005/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) throw new Error('Upload failed');
+
+        const data = await response.json();
+        
+        // 同时获取 base64 用于预览，以防 URL 无法立即访问或需要离线预览
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const base64 = (e.target?.result as string).split(',')[1];
+          setAttachments(prev => prev.map(a => 
+            a.id === id ? { ...a, url: data.url, data: base64, isLoading: false } : a
+          ));
+        };
+        reader.readAsDataURL(file);
+      } catch (error) {
+        console.error('Upload error:', error);
+        setAttachments(prev => prev.filter(a => a.id !== id));
+        setState(prev => ({ ...prev, error: '图片上传失败，请稍后重试。' }));
+      }
+    }
+    
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments(prev => prev.filter(a => a.id !== id));
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -510,6 +641,32 @@ const App: React.FC = () => {
             onDelete={handleDeleteAssistant}
             onBack={() => setView('chat')}
           />
+        ) : view === 'productDetail' && selectedProduct ? (
+          <ProductDetailView 
+            product={selectedProduct} 
+            detailUrl={selectedAssistant.detailUrl}
+            detailField={selectedAssistant.detailField}
+            onBack={() => {
+              setView(detailReturnView);
+              setSelectedProduct(null);
+            }} 
+          />
+        ) : view === 'productList' ? (
+          <ProductListView 
+            groups={productListGroups}
+            initialGroupIndex={initialGroupIndex}
+            initialScrollTop={productListScrollTop}
+            onBack={() => {
+              setProductListScrollTop(0); // 返回时清除
+              setView('chat');
+            }}
+            onViewProduct={(product, scrollTop) => {
+              setProductListScrollTop(scrollTop);
+              setSelectedProduct(product);
+              setDetailReturnView('productList');
+              setView('productDetail');
+            }}
+          />
         ) : (
           <Layout 
             assistantName={selectedAssistant.name} 
@@ -523,7 +680,7 @@ const App: React.FC = () => {
             >
               {state.messages.length === 0 && (
                 <div className="h-full flex flex-col items-center justify-center text-center p-10 animate-fade-in">
-                  <div className={`w-20 h-20 rounded-3xl ${selectedAssistant.avatar} mb-6 flex items-center justify-center text-white text-3xl font-bold shadow-2xl shadow-blue-100 animate-breathe`}>
+                  <div className={`w-20 h-20 rounded-3xl bg-black mb-6 flex items-center justify-center text-white text-3xl font-bold shadow-2xl animate-breathe`}>
                     {selectedAssistant.name.charAt(0)}
                   </div>
                   <h2 className="text-2xl font-outfit font-bold text-gray-800 mb-2">我是 {selectedAssistant.name}</h2>
@@ -538,13 +695,52 @@ const App: React.FC = () => {
                   isLast={index === state.messages.length - 1} 
                   isStreaming={state.isStreaming}
                   onRegenerate={handleRegenerate}
-                  onAction={handleMessageAction}
+                  onAction={(action, data) => {
+                    if (action === 'viewProduct') {
+                      if (scrollRef.current) {
+                        setChatScrollTop(scrollRef.current.scrollTop);
+                      }
+                      setSelectedProduct(data);
+                      setDetailReturnView('chat');
+                      setView('productDetail');
+                    } else if (action === 'viewAllProducts') {
+                      if (scrollRef.current) {
+                        setChatScrollTop(scrollRef.current.scrollTop);
+                      }
+                      setProductListGroups(data.groups);
+                      setInitialGroupIndex(data.activeGroupIndex);
+                      setView('productList');
+                    } else {
+                      handleMessageAction(action, data);
+                    }
+                  }}
+                  onSendSuggestion={(suggestion) => processSend(suggestion)}
                 />
               ))}
               {state.error && (
                 <div className="flex items-center gap-2 justify-center p-4 bg-red-50 text-red-600 rounded-2xl text-xs font-medium mb-8 border border-red-100 mx-4 text-left">
                   <AlertCircle size={14} />
                   {state.error}
+                </div>
+              )}
+
+              {/* 建议选项 (Suggestions) - 移动到消息列表末尾，紧跟气泡 */}
+              {suggestions.length > 0 && !state.isStreaming && (
+                <div className="mt-4 flex flex-wrap gap-2 animate-in fade-in slide-in-from-top-2 duration-500 pb-4">
+                  {suggestions.map((suggestion, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => processSend(suggestion)}
+                      className="px-4 py-2 bg-white/60 backdrop-blur-md border border-gray-100/50 rounded-2xl text-[12px] text-gray-600 hover:text-gray-900 hover:border-gray-300 hover:bg-white transition-all shadow-sm hover:shadow-md flex items-center gap-2 group/suggestion"
+                    >
+                      <span>{suggestion}</span>
+                      <div className="w-4 h-4 rounded-full bg-gray-50 flex items-center justify-center group-hover/suggestion:bg-gray-900 group-hover/suggestion:text-white transition-colors">
+                        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14m-7-7l7 7-7 7" />
+                        </svg>
+                      </div>
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
@@ -559,45 +755,55 @@ const App: React.FC = () => {
                 </button>
               </div>
 
+              {/* 图片预览区域 */}
               {attachments.length > 0 && !isRecording && (
-                <div className="flex gap-3 overflow-x-auto no-scrollbar mb-4 px-1 py-1 items-center">
-                  {attachments.map((att) => (
-                    <div key={att.id} className="relative flex-shrink-0 animate-in fade-in zoom-in duration-300">
-                      <div className="w-16 h-16 rounded-2xl border border-gray-100 bg-white shadow-sm flex items-center justify-center overflow-hidden text-left">
-                        {att.isLoading ? (
-                          <div className="flex flex-col items-center justify-center gap-1">
+                <div className="flex flex-wrap gap-2 mb-3 px-2">
+                  {attachments.map((file) => (
+                    <div key={file.id} className="relative group animate-in zoom-in-95 duration-200">
+                      <div className="w-16 h-16 rounded-xl overflow-hidden border border-gray-100 shadow-sm bg-white">
+                        {file.isLoading ? (
+                          <div className="w-full h-full flex items-center justify-center">
                             <Loader2 size={16} className="text-blue-500 animate-spin" />
                           </div>
-                        ) : att.mimeType.startsWith('image/') ? (
-                          <img 
-                            src={`data:${att.mimeType};base64,${att.data}`} 
-                            className="w-full h-full object-cover"
-                            alt="preview"
-                          />
                         ) : (
-                          <div className="flex flex-col items-center justify-center gap-1 p-2">
-                            <FileText size={18} className="text-gray-400" />
-                            <span className="text-[8px] text-gray-500 line-clamp-1 break-all px-1 text-center font-medium">{att.name}</span>
-                          </div>
+                          <img 
+                            src={file.url || (file.data ? `data:${file.mimeType};base64,${file.data}` : '')} 
+                            alt={file.name}
+                            className="w-full h-full object-cover"
+                          />
                         )}
                       </div>
-                      <button 
-                        onClick={() => removeAttachment(att.id)}
-                        className="absolute -top-1.5 -right-1.5 bg-white text-gray-800 rounded-full p-1 shadow-md border border-gray-100 transition-all active:scale-90"
+                      <button
+                        onClick={() => removeAttachment(file.id)}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-gray-900 text-white rounded-full flex items-center justify-center shadow-lg hover:bg-gray-800 transition-colors z-10"
                       >
-                        <X size={12} />
+                        <X size={10} />
                       </button>
                     </div>
                   ))}
                 </div>
               )}
 
-              <div className={`bg-white rounded-[32px] shadow-lg border border-gray-100 flex items-center px-3 py-1.5 gap-2 transition-all duration-300 min-h-[60px] ${isRecording ? 'scale-[0.98] opacity-50' : ''}`}>
-                <input type="file" ref={fileInputRef} onChange={handleFileChange} multiple className="hidden" accept="image/*" />
-                <button onClick={() => fileInputRef.current?.click()} className="p-3 text-gray-800 hover:text-black transition-colors flex-shrink-0">
-                  <Camera size={24} strokeWidth={1.8} />
-                </button>
-                
+              <div className={`bg-white rounded-[32px] shadow-lg border border-gray-100 flex items-center px-2 py-1.5 transition-all duration-300 min-h-[60px] ${isRecording ? 'scale-[0.98] opacity-50' : ''}`}>
+                <div className="flex-shrink-0 ml-1">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isRecording}
+                    className="p-3 text-gray-400 hover:text-blue-500 transition-all active:scale-90 disabled:opacity-50"
+                    title="上传图片"
+                  >
+                    <Image size={24} strokeWidth={1.8} />
+                  </button>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    accept="image/*"
+                    className="hidden"
+                    multiple
+                  />
+                </div>
+
                 <div className="flex-1 flex justify-center items-center px-1 overflow-hidden min-h-[48px]">
                   {inputMode === 'voice' ? (
                     <button

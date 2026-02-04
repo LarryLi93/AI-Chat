@@ -1,5 +1,5 @@
 {
-  "name": "Aura Chat",
+  "name": "销售助手",
   "description": "A minimalist, mobile-first AI chat application with a 'breathing' UI and real-time streaming capabilities powered by Gemini.",
   "requestFramePermissions": [
     "microphone"

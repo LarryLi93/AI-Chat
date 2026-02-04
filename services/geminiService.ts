@@ -70,70 +70,83 @@ export class GeminiService {
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
+        
+        if (value) {
+          buffer += decoder.decode(value, { stream: true });
+        }
         
         let startIdx = 0;
         let braceCount = 0;
+        let bracketCount = 0;
         let inString = false;
 
         for (let i = 0; i < buffer.length; i++) {
           const char = buffer[i];
-          if (char === '"' && buffer[i-1] !== '\\') inString = !inString;
+          // 简单的转义处理
+          if (char === '"' && (i === 0 || buffer[i-1] !== '\\')) inString = !inString;
+          
           if (!inString) {
             if (char === '{') braceCount++;
-            if (char === '}') {
-              braceCount--;
-              if (braceCount === 0) {
-                const jsonStr = buffer.substring(startIdx, i + 1);
-                try {
-                  let cleanJsonStr = jsonStr.trim();
-                  // 处理 SSE 格式的 'data: ' 前缀
-                  if (cleanJsonStr.startsWith('data: ')) {
-                    cleanJsonStr = cleanJsonStr.slice(6).trim();
-                  }
-                  
-                  const obj = JSON.parse(cleanJsonStr);
-                  
-                  // 1. 如果对象本身包含 output 字段，发送覆盖信号
-                  if (obj.output !== undefined && obj.output !== null) {
-                    const outputStr = typeof obj.output === 'string' ? obj.output : JSON.stringify(obj.output);
-                    yield `__N8N_OVERRIDE__${outputStr}`;
-                    // 如果有 output，通常意味着这是最终结果，不再处理同级 content，避免覆盖后又被追加
-                    startIdx = i + 1;
-                    continue; 
-                  }
-                  
-                  // 2. 正常流式内容处理 (不使用 continue，确保 output 包含的 content 也能流式输出)
-                  if (obj.type === 'item' && obj.content) {
-                    const content = obj.content;
-                    // 如果 content 是字符串且包含 output 的 JSON，则解析并发送覆盖信号
-                    if (typeof content === 'string' && content.trim().startsWith('{"output":')) {
-                      try {
-                        const inner = JSON.parse(content);
-                        if (inner.output !== undefined && inner.output !== null) {
-                          const innerOutputStr = typeof inner.output === 'string' ? inner.output : JSON.stringify(inner.output);
-                          yield `__N8N_OVERRIDE__${innerOutputStr}`;
-                        }
-                      } catch (e) {
-                        yield content; // 解析失败则按普通内容处理
+            else if (char === '}') braceCount--;
+            else if (char === '[') bracketCount++;
+            else if (char === ']') bracketCount--;
+
+            // 当括号全部闭合且不处于初始状态时，尝试解析
+            if (braceCount === 0 && bracketCount === 0 && (char === '}' || char === ']')) {
+              const jsonStr = buffer.substring(startIdx, i + 1);
+              try {
+                let cleanJsonStr = jsonStr.trim();
+                // 处理可能的前缀 (如 SSE 的 'data: ')
+                if (cleanJsonStr.startsWith('data: ')) {
+                  cleanJsonStr = cleanJsonStr.slice(6).trim();
+                }
+                
+                const obj = JSON.parse(cleanJsonStr);
+                
+                // 1. 处理标准 API 格式 (直接返回数组或不带 output/content 的对象)
+                if (Array.isArray(obj) || (typeof obj === 'object' && obj !== null && !('output' in obj) && !('content' in obj) && !('type' in obj))) {
+                  yield `__N8N_OVERRIDE__${JSON.stringify(obj)}`;
+                }
+                // 2. 处理包装格式
+                else if (obj.output !== undefined && obj.output !== null) {
+                  const outputStr = typeof obj.output === 'string' ? obj.output : JSON.stringify(obj.output);
+                  yield `__N8N_OVERRIDE__${outputStr}`;
+                } else if (obj.type === 'item' && obj.content) {
+                  const content = obj.content;
+                  if (typeof content === 'string' && content.trim().startsWith('{"output":')) {
+                    try {
+                      const inner = JSON.parse(content);
+                      if (inner.output !== undefined && inner.output !== null) {
+                        const innerOutputStr = typeof inner.output === 'string' ? inner.output : JSON.stringify(inner.output);
+                        yield `__N8N_OVERRIDE__${innerOutputStr}`;
                       }
-                    } else {
+                    } catch (e) {
                       yield content;
                     }
-                  } else if (obj.content) {
-                    yield obj.content;
+                  } else {
+                    yield content;
                   }
-                } catch (e) {
-                  // Ignore partial JSON
+                } else if (obj.content) {
+                  yield obj.content;
                 }
-                startIdx = i + 1;
+              } catch (e) {
+                // 解析失败则跳过，继续累积 buffer
               }
+              startIdx = i + 1;
             }
           }
         }
+        
         buffer = buffer.substring(startIdx);
+        if (done) break;
+      }
+
+      // 兜底：如果 done 了 buffer 还有内容且没被解析（比如不是以 } 或 ] 结尾）
+      if (buffer.trim()) {
+        try {
+          const obj = JSON.parse(buffer.trim());
+          yield `__N8N_OVERRIDE__${JSON.stringify(obj)}`;
+        } catch (e) {}
       }
     } catch (error: any) {
       if (error.name === 'TypeError' || error.message.includes('fetch')) {

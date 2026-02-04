@@ -6,18 +6,16 @@ interface LayoutProps {
   assistantName: string;
   assistantAvatar: string;
   onSwitchClick: () => void;
-  onUserClick?: () => void;
 }
 
 export const Layout: React.FC<LayoutProps> = ({ 
   children, 
   assistantName, 
   assistantAvatar, 
-  onSwitchClick,
-  onUserClick 
+  onSwitchClick
 }) => {
   return (
-    <div className="absolute inset-0 flex flex-col h-full w-full animate-slide-in-right bg-[#fafafa]">
+    <div className="absolute inset-0 flex flex-col h-full w-full animate-in fade-in zoom-in-95 duration-300 bg-[#fafafa]">
       <header className="z-30 px-5 py-3 flex items-center justify-between glass-effect border-b border-gray-100/50">
         <button 
           onClick={onSwitchClick}
@@ -28,19 +26,14 @@ export const Layout: React.FC<LayoutProps> = ({
 
         <div className="flex flex-col items-center">
           <div className="flex items-center gap-2">
-            <div className={`w-6 h-6 rounded-full ${assistantAvatar} flex items-center justify-center text-white font-bold text-[10px] shadow-sm shadow-blue-100`}>
+            <div className={`w-6 h-6 rounded-full bg-black flex items-center justify-center text-white font-bold text-[10px] shadow-sm`}>
               {assistantName.charAt(0)}
             </div>
             <h1 className="font-outfit text-sm font-medium text-gray-800 tracking-tight">{assistantName}</h1>
           </div>
         </div>
 
-        <button 
-          onClick={onUserClick}
-          className="px-2 text-gray-500 hover:text-gray-800 transition-colors text-[11px] font-medium tracking-widest uppercase outline-none"
-        >
-          用户
-        </button>
+        <div className="w-10" />
       </header>
 
       <div className="flex-1 relative overflow-hidden flex flex-col">

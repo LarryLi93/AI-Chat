@@ -24,6 +24,10 @@ const AssistantEditor: React.FC<{
     description: assistant?.description || '',
     n8nUrl: assistant?.n8nUrl || '',
     n8nParams: assistant?.n8nParams || '{\n  "chatInput": ""\n}',
+    detailUrl: assistant?.detailUrl || '',
+    detailField: assistant?.detailField || '',
+    suggestionUrl: assistant?.suggestionUrl || '',
+    suggestionParams: assistant?.suggestionParams || '',
     avatar: assistant?.avatar || 'bg-gradient-to-tr from-indigo-400 to-purple-500',
     color: assistant?.color || 'bg-indigo-500'
   });
@@ -173,6 +177,49 @@ const AssistantEditor: React.FC<{
                       {testResult.message}
                     </div>
                   )}
+                </div>
+
+                {/* Product Detail Configuration */}
+                <div className="pt-4 border-t border-gray-100">
+                   <h3 className="text-[12px] font-bold text-gray-800 mb-4">增强配置</h3>
+                   <div className="space-y-4">
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em] ml-2 mb-2.5 block">详情 API URL</label>
+                        <input 
+                          value={formData.detailUrl}
+                          onChange={e => setFormData({...formData, detailUrl: e.target.value})}
+                          placeholder="http://example.com/api/product_detail"
+                          className="w-full px-6 py-4 bg-gray-50/50 border border-gray-100 rounded-[20px] text-[12px] text-gray-900 font-mono focus:ring-4 focus:ring-blue-500/5 focus:bg-white outline-none transition-all"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em] ml-2 mb-2.5 block">详情参数字段 (Field)</label>
+                        <input 
+                          value={formData.detailField}
+                          onChange={e => setFormData({...formData, detailField: e.target.value})}
+                          placeholder="例如: code"
+                          className="w-full px-6 py-4 bg-gray-50/50 border border-gray-100 rounded-[20px] text-[12px] text-gray-900 font-mono focus:ring-4 focus:ring-blue-500/5 focus:bg-white outline-none transition-all"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em] ml-2 mb-2.5 block">建议/追问工作流 URL</label>
+                        <input 
+                          value={formData.suggestionUrl}
+                          onChange={e => setFormData({...formData, suggestionUrl: e.target.value})}
+                          placeholder="https://n8n.example.com/webhook/..."
+                          className="w-full px-6 py-4 bg-gray-50/50 border border-gray-100 rounded-[20px] text-[12px] text-gray-900 font-mono focus:ring-4 focus:ring-blue-500/5 focus:bg-white outline-none transition-all"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em] ml-2 mb-2.5 block">建议/追问请求参数 (JSON)</label>
+                        <textarea 
+                          value={formData.suggestionParams}
+                          onChange={e => setFormData({...formData, suggestionParams: e.target.value})}
+                          placeholder='{"key": "value"}'
+                          className="w-full h-24 px-6 py-4 bg-gray-50/50 border border-gray-100 rounded-[20px] text-[12px] text-gray-900 font-mono focus:ring-4 focus:ring-blue-500/5 focus:bg-white outline-none transition-all resize-none"
+                        />
+                      </div>
+                   </div>
                 </div>
               </div>
             </div>
